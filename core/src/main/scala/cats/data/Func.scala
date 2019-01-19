@@ -29,9 +29,8 @@ object Func extends FuncInstances {
     }
 
   /** applicative function. */
-  def appFunc[F[_], A, B](run0: A => F[B])(implicit FF: Applicative[F]): AppFunc[F, A, B] =
+  def appFunc[F[_], A, B](run0: A => F[B]): AppFunc[F, A, B] =
     new AppFunc[F, A, B] {
-      def F: Applicative[F] = FF
       def run: A => F[B] = run0
     }
 
@@ -95,32 +94,27 @@ sealed private[data] trait FuncApplicative[F[_], C] extends Applicative[λ[α =>
  * An implementation of [[Func]] that's specialized to [[Applicative]].
  */
 sealed abstract class AppFunc[F[_], A, B] extends Func[F, A, B] { self =>
-  def F: Applicative[F]
 
   def product[G[_]](g: AppFunc[G, A, B]): AppFunc[λ[α => Tuple2K[F, G, α]], A, B] = {
-    implicit val FF: Applicative[F] = self.F
-    implicit val GG: Applicative[G] = g.F
     Func.appFunc[λ[α => Tuple2K[F, G, α]], A, B] { a: A =>
       Tuple2K(self.run(a), g.run(a))
     }
   }
 
-  def compose[G[_], C](g: AppFunc[G, C, A]): AppFunc[Nested[G, F, ?], C, B] = {
-    implicit val gfApplicative: Applicative[Nested[G, F, ?]] = Nested.catsDataApplicativeForNested[G, F](g.F, F)
+  def compose[G[_], C](g: AppFunc[G, C, A])(implicit G: Functor[G]): AppFunc[Nested[G, F, ?], C, B] = {
     Func.appFunc[Nested[G, F, ?], C, B]({ c: C =>
-      Nested(g.F.map(g.run(c))(self.run))
+      Nested(G.map(g.run(c))(self.run))
     })
   }
 
-  def andThen[G[_], C](g: AppFunc[G, B, C]): AppFunc[Nested[F, G, ?], A, C] =
+  def andThen[G[_], C](g: AppFunc[G, B, C])(implicit F: Functor[F]): AppFunc[Nested[F, G, ?], A, C] =
     g.compose(self)
 
-  def map[C](f: B => C): AppFunc[F, A, C] = {
-    implicit val FF: Applicative[F] = self.F
+  override def map[C](f: B => C)(implicit F: Functor[F]): AppFunc[F, A, C] = {
     Func.appFunc(a => F.map(self.run(a))(f))
   }
 
-  def traverse[G[_]](ga: G[A])(implicit GG: Traverse[G]): F[G[B]] =
+  def traverse[G[_]](ga: G[A])(implicit GG: Traverse[G], F: Applicative[F]): F[G[B]] =
     GG.traverse(ga)(self.run)(F)
 }
 
@@ -136,11 +130,11 @@ abstract private[data] class AppFuncInstances {
 sealed private[data] trait AppFuncApplicative[F[_], C] extends Applicative[λ[α => AppFunc[F, C, α]]] {
   def F: Applicative[F]
   override def map[A, B](fa: AppFunc[F, C, A])(f: A => B): AppFunc[F, C, B] =
-    fa.map(f)
+    fa.map(f)(F)
   def ap[A, B](f: AppFunc[F, C, A => B])(fa: AppFunc[F, C, A]): AppFunc[F, C, B] =
-    Func.appFunc[F, C, B](c => F.ap(f.run(c))(fa.run(c)))(F)
+    Func.appFunc[F, C, B](c => F.ap(f.run(c))(fa.run(c)))
   override def product[A, B](fa: AppFunc[F, C, A], fb: AppFunc[F, C, B]): AppFunc[F, C, (A, B)] =
-    Func.appFunc[F, C, (A, B)](c => F.product(fa.run(c), fb.run(c)))(F)
+    Func.appFunc[F, C, (A, B)](c => F.product(fa.run(c), fb.run(c)))
   def pure[A](a: A): AppFunc[F, C, A] =
-    Func.appFunc[F, C, A](c => F.pure(a))(F)
+    Func.appFunc[F, C, A](c => F.pure(a))
 }
