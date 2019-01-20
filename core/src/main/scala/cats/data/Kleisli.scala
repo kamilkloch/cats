@@ -45,6 +45,21 @@ final case class Kleisli[F[_], A, B](run: A => F[B]) { self =>
   def compose[Z](k: Kleisli[F, Z, A])(implicit F: FlatMap[F]): Kleisli[F, Z, B] =
     this.compose(k.run)
 
+  def product[G[_]](g: Kleisli[G, A, B]): Kleisli[λ[α => Tuple2K[F, G, α]], A, B] = {
+    Kleisli[λ[α => Tuple2K[F, G, α]], A, B] { a: A =>
+      Tuple2K(self.run(a), g.run(a))
+    }
+  }
+
+  def composeNested[G[_], C](g: Kleisli[G, C, A])(implicit G: Functor[G]): Kleisli[Nested[G, F, ?], C, B] = {
+    Kleisli[Nested[G, F, ?], C, B]({ c: C =>
+      Nested(G.map(g.run(c))(self.run))
+    })
+  }
+
+  def andThenNested[G[_], C](g: Kleisli[G, B, C])(implicit F: Functor[F]): Kleisli[Nested[F, G, ?], A, C] =
+    g.composeNested(self)
+
   def traverse[G[_]](f: G[A])(implicit F: Applicative[F], G: Traverse[G]): F[G[B]] =
     G.traverse(f)(run)
 
